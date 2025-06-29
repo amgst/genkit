@@ -1,33 +1,10 @@
-import { ChromaApi, OpenAIEmbeddingFunction } from 'chromadb';
 import { VectorDocument, ScrapedContent } from './types';
 
 export class VectorStore {
-  private client: ChromaApi;
-  private collection: any;
-  private embeddingFunction: OpenAIEmbeddingFunction;
-
-  constructor() {
-    this.client = new ChromaApi({
-      host: 'localhost',
-      port: 8000
-    });
-    
-    this.embeddingFunction = new OpenAIEmbeddingFunction({
-      openai_api_key: process.env.OPENAI_API_KEY || ''
-    });
-  }
+  private documents: VectorDocument[] = [];
 
   async initialize() {
-    try {
-      this.collection = await this.client.getOrCreateCollection({
-        name: 'vancegraphix_content',
-        embeddingFunction: this.embeddingFunction
-      });
-      console.log('Vector store initialized');
-    } catch (error) {
-      console.error('Error initializing vector store:', error);
-      throw error;
-    }
+    console.log('In-memory vector store initialized');
   }
 
   async addDocuments(scrapedContent: ScrapedContent[]) {
@@ -47,32 +24,33 @@ export class VectorStore {
       });
     }
 
-    try {
-      await this.collection.add({
-        ids: documents.map(d => d.id),
-        documents: documents.map(d => d.content),
-        metadatas: documents.map(d => d.metadata)
-      });
-      
-      console.log(`Added ${documents.length} document chunks to vector store`);
-    } catch (error) {
-      console.error('Error adding documents to vector store:', error);
-      throw error;
-    }
+    this.documents = documents;
+    console.log(`Added ${documents.length} document chunks to vector store`);
   }
 
   async search(query: string, limit = 5) {
     try {
-      const results = await this.collection.query({
-        queryTexts: [query],
-        nResults: limit
-      });
+      // Simple keyword matching
+      const queryWords = query.toLowerCase().split(' ');
       
-      return results.documents[0].map((doc: string, index: number) => ({
-        content: doc,
-        metadata: results.metadatas[0][index],
-        distance: results.distances[0][index]
-      }));
+      const results = this.documents
+        .map(doc => {
+          const content = doc.content.toLowerCase();
+          const score = queryWords.reduce((acc, word) => {
+            return acc + (content.includes(word) ? 1 : 0);
+          }, 0);
+          
+          return {
+            content: doc.content,
+            metadata: doc.metadata,
+            distance: 1 - (score / queryWords.length)
+          };
+        })
+        .filter(result => result.distance < 1)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, limit);
+      
+      return results;
     } catch (error) {
       console.error('Error searching vector store:', error);
       return [];
